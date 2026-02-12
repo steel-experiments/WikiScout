@@ -47,6 +47,13 @@ class ParseModule:
             
             # Remove extra whitespace
             clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+
+            # Normalize spacing around punctuation and delimiters
+            clean_text = re.sub(r'\s+([,.;:!?])', r'\1', clean_text)
+            clean_text = re.sub(r'\(\s+', '(', clean_text)
+            clean_text = re.sub(r'\s+\)', ')', clean_text)
+            clean_text = re.sub(r'"\s+', '"', clean_text)
+            clean_text = re.sub(r'\s+"', '"', clean_text)
             
             # Remove common Wikipedia artifacts
             clean_text = re.sub(r'\[.*?\]', '', clean_text)  # Remove [citations]

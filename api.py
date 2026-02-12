@@ -15,12 +15,25 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
+from contextlib import asynccontextmanager
 
 from agent import WikipediaAgent
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize agent
+agent = WikipediaAgent()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("WikiScout API starting up...")
+    logger.info("Docs available at: http://localhost:8000/docs")
+    logger.info(f"Cache directory: {agent.cache_dir}")
+    yield
+    logger.info("WikiScout API shutting down...")
+
 
 # Create FastAPI app
 app = FastAPI(
@@ -29,6 +42,7 @@ app = FastAPI(
     version="1.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
     contact={
         "name": "WikiScout",
         "url": "https://github.com/steel-experiments/WikiScout",
@@ -46,10 +60,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Initialize agent
-agent = WikipediaAgent()
-
 
 # Response Models
 class Candidate(BaseModel):
@@ -106,6 +116,20 @@ class ErrorResponse(BaseModel):
     timestamp: str
 
 
+class BatchRequest(BaseModel):
+    """Batch fetch request"""
+    titles: List[str] = Field(..., description="Wikipedia page titles", min_length=1, max_length=20)
+    use_cache: bool = Field(True, description="Use cached pages if available")
+
+
+class BatchResponse(BaseModel):
+    """Batch fetch response"""
+    status: str
+    timestamp: str
+    count: int
+    results: List[Dict[str, Any]]
+
+
 # Endpoints
 @app.get("/", tags=["General"])
 async def read_root():
@@ -120,6 +144,7 @@ async def read_root():
             "search": "/search/{query}",
             "summarize": "/summarize/{query}",
             "compare": "/compare",
+            "batch": "/batch",
             "status": "/status",
         }
     }
@@ -157,7 +182,7 @@ async def search_wikipedia(
     """
     try:
         logger.info(f"API Search: {query} (candidates={candidates})")
-        result = agent.search(query, candidates=candidates)
+        result = await agent.search_async(query, candidates=candidates)
         
         if result.get("status") == "error":
             raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
@@ -195,7 +220,7 @@ async def summarize_article(
     """
     try:
         logger.info(f"API Summarize: {query} (bullets={bullets})")
-        result = agent.summarize(query, bullets=bullets)
+        result = await agent.summarize_async(query, bullets=bullets)
         
         if result.get("status") == "error":
             raise HTTPException(status_code=404, detail=result.get("error", "Article not found"))
@@ -236,7 +261,7 @@ async def compare_topics(
     """
     try:
         logger.info(f"API Compare: {topic1} vs {topic2} (bullets={bullets})")
-        result = agent.compare(topic1, topic2, bullets=bullets)
+        result = await agent.compare_async(topic1, topic2, bullets=bullets)
         
         if result.get("status") == "error":
             raise HTTPException(status_code=404, detail=result.get("error", "Topics not found"))
@@ -286,6 +311,35 @@ async def get_status():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post(
+    "/batch",
+    response_model=BatchResponse,
+    tags=["Batch"],
+    summary="Fetch multiple Wikipedia pages in parallel",
+)
+async def batch_fetch(payload: BatchRequest):
+    """
+    Fetch multiple Wikipedia pages in parallel for high performance.
+
+    Returns a list of page payloads (success or error per title).
+    """
+    if not payload.titles:
+        raise HTTPException(status_code=400, detail="titles must not be empty")
+
+    try:
+        logger.info(f"API Batch: {len(payload.titles)} titles")
+        results = await agent.fetch_pages_async(payload.titles, use_cache=payload.use_cache)
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "count": len(results),
+            "results": results,
+        }
+    except Exception as e:
+        logger.error(f"Batch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # Error handlers
 @app.exception_handler(404)
 async def not_found_handler(request, exc):
@@ -309,20 +363,6 @@ async def internal_error_handler(request, exc):
             "timestamp": datetime.now().isoformat(),
         }
     )
-
-
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info("WikiScout API starting up...")
-    logger.info(f"Docs available at: http://localhost:8000/docs")
-    logger.info(f"Cache directory: {agent.cache_dir}")
-
-
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("WikiScout API shutting down...")
 
 
 if __name__ == "__main__":

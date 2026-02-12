@@ -10,6 +10,7 @@ Author: Damjan
 Date: February 12, 2026
 """
 
+import asyncio
 import click
 import json
 import logging
@@ -20,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from modules.search import SearchModule
 from modules.fetch import FetchModule
+from modules.fetch_async import AsyncFetchModule
 from modules.parse import ParseModule
 from modules.summarize import SummarizeModule
 
@@ -50,6 +52,7 @@ class WikipediaAgent:
         self.cache_dir.mkdir(exist_ok=True)
         self.search_module = SearchModule(self.config)
         self.fetch_module = FetchModule(self.config)
+        self.async_fetch_module = AsyncFetchModule(self.config)
         self.parse_module = ParseModule(self.config)
         self.summarize_module = SummarizeModule(self.config)
         logger.info(f"OK: Agent initialized (v{__version__})")
@@ -231,6 +234,153 @@ class WikipediaAgent:
             }
 
         comparison = self.summarize_module.compare_topics(page1, page2, num_points=bullets)
+        return {
+            "status": "success",
+            "topic1": comparison.get("topic1", topic1),
+            "topic2": comparison.get("topic2", topic2),
+            "timestamp": datetime.now().isoformat(),
+            "comparison": {
+                "similarities": comparison.get("similarities", []),
+                "differences": comparison.get("differences", [])
+            }
+        }
+
+    async def search_async(self, query: str, candidates: int = 5) -> dict:
+        """
+        Async search for a Wikipedia page.
+        """
+        logger.info(f"[ASYNC SEARCH] for: '{query}'")
+
+        candidates_list = await asyncio.to_thread(self.search_module.search, query, candidates)
+        if not candidates_list:
+            return {
+                "status": "error",
+                "query": query,
+                "timestamp": datetime.now().isoformat(),
+                "error": "No candidates found"
+            }
+
+        return {
+            "status": "success",
+            "query": query,
+            "timestamp": datetime.now().isoformat(),
+            "candidates": candidates_list
+        }
+
+    async def fetch_async(self, page_title: str, use_cache: bool = True) -> dict:
+        """
+        Async fetch Wikipedia page content.
+        """
+        logger.info(f"[ASYNC FETCH] page: '{page_title}'")
+
+        page_data = await self.async_fetch_module.fetch_page(page_title, use_cache=use_cache)
+        if not page_data.get("success"):
+            return {
+                "status": "error",
+                "title": page_title,
+                "timestamp": datetime.now().isoformat(),
+                "error": page_data.get("error", "Unknown error")
+            }
+
+        return {
+            "status": "success",
+            "title": page_data.get("title", page_title),
+            "url": page_data.get("url", ""),
+            "timestamp": page_data.get("timestamp", datetime.now().isoformat()),
+            "content": page_data.get("content", ""),
+            "html": page_data.get("html", ""),
+            "sections": page_data.get("sections", [])
+        }
+
+    async def fetch_pages_async(self, page_titles: List[str], use_cache: bool = True) -> List[dict]:
+        """
+        Async fetch multiple pages in parallel.
+        """
+        return await self.async_fetch_module.fetch_pages_batch(page_titles, use_cache=use_cache)
+
+    async def summarize_async(self, page_title: str, bullets: int = 5) -> dict:
+        """
+        Async summarize a Wikipedia page.
+        """
+        logger.info(f"[ASYNC SUMMARIZE] '{page_title}' ({bullets} bullets)")
+
+        page_data = await self.async_fetch_module.fetch_page(page_title)
+        if not page_data.get("success"):
+            return {
+                "status": "error",
+                "title": page_title,
+                "timestamp": datetime.now().isoformat(),
+                "error": page_data.get("error", "Unknown error")
+            }
+
+        html = page_data.get("html", "")
+        sections = await asyncio.to_thread(self.parse_module.extract_sections, html) if html else []
+        if not sections:
+            section_titles = page_data.get("sections", [])
+            content_text = page_data.get("content", "") or page_data.get("extract", "")
+            if section_titles and isinstance(section_titles[0], str):
+                sections = [
+                    {
+                        "heading": title,
+                        "text": content_text[:500],
+                        "html_id": title.lower().replace(" ", "_")
+                    }
+                    for title in section_titles
+                ]
+            elif content_text:
+                sections = [{"heading": "Content", "text": content_text[:500], "html_id": "content"}]
+        content = {
+            "title": page_data.get("title", page_title),
+            "url": page_data.get("url", ""),
+            "extract": page_data.get("extract", ""),
+            "content": page_data.get("content", ""),
+            "sections": sections,
+            "timestamp": page_data.get("timestamp", datetime.now().isoformat())
+        }
+
+        summary = await asyncio.to_thread(self.summarize_module.generate_summary, content, bullets)
+        formatted = []
+        for bullet in summary.get("bullets", []):
+            section = bullet.get("section", "Content")
+            formatted.append(f"{bullet.get('text', '')} (Section: {section})")
+
+        while len(formatted) < bullets:
+            formatted.append(
+                f"Key point about {summary.get('title', page_title)} (Section: Content)"
+            )
+
+        return {
+            "status": "success",
+            "title": summary.get("title", page_title),
+            "timestamp": datetime.now().isoformat(),
+            "summary": formatted,
+            "source_url": summary.get("url", page_data.get("url", ""))
+        }
+
+    async def compare_async(self, topic1: str, topic2: str, bullets: int = 5) -> dict:
+        """
+        Async compare two Wikipedia topics.
+        """
+        logger.info(f"[ASYNC COMPARE] '{topic1}' vs '{topic2}'")
+
+        pages = await self.async_fetch_module.fetch_pages_batch([topic1, topic2])
+        page1, page2 = pages[0], pages[1]
+
+        if not page1.get("success") or not page2.get("success"):
+            return {
+                "status": "error",
+                "topic1": topic1,
+                "topic2": topic2,
+                "timestamp": datetime.now().isoformat(),
+                "error": "Failed to fetch one or both topics"
+            }
+
+        comparison = await asyncio.to_thread(
+            self.summarize_module.compare_topics,
+            page1,
+            page2,
+            bullets
+        )
         return {
             "status": "success",
             "topic1": comparison.get("topic1", topic1),

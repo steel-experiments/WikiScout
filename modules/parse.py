@@ -50,7 +50,7 @@ class ParseModule:
             
             # Remove common Wikipedia artifacts
             clean_text = re.sub(r'\[.*?\]', '', clean_text)  # Remove [citations]
-            clean_text = re.sub(r'[edit]', '', clean_text)     # Remove [edit] markers
+            clean_text = re.sub(r'\[edit\]', '', clean_text)  # Remove [edit] markers
             
             return clean_text
         except Exception as e:
@@ -84,7 +84,7 @@ class ParseModule:
                 if element.name in ['h2', 'h3', 'h4']:
                     level = int(element.name[1])
                     # Get clean text from heading
-                    text = element.get_text(strip=True)
+                    text = element.get_text(" ", strip=True)
                     
                     if '[edit]' in text:
                         text = text.replace('[edit]', '').strip()
@@ -103,7 +103,7 @@ class ParseModule:
                         
                 elif element.name == 'p' and current_section is not None:
                     # Extract clean text from paragraph
-                    para_text = element.get_text(strip=True)
+                    para_text = element.get_text(" ", strip=True)
                     if para_text:
                         current_section["paragraphs"].append(para_text)
                         if not current_section["text"]:

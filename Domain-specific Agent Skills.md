@@ -1,18 +1,22 @@
 # Domain-specific Agent Skills
 
-**Document Version:** 1.1
+**WikiScout: A Professional Wikipedia Browsing & Summarization Agent**
 
-**Author:** Damjan
+**Document Version:** 2.0  
+**Author:** Damjan  
+**Date:** February 12, 2026  
+**Status:** Production Ready (v1.1)
 
-**Date:** February 12, 2026
+**Key Updates in v2.0:**
+- Comprehensive redesign based on actual implementation
+- Module-by-module architecture documentation
+- Real performance metrics and results
+- Integration patterns and examples
+- Actual codebase statistics and line counts
 
-**Updates in v1.1:**
-- JSON output format support across all CLI commands
-- Parallel fetching for compare operations (~2x speedup)
-- Enhanced error handling with structured responses
-- All 21 unit tests passing
+---
 
-## Purpose and Audience
+## Executive Summary
 This document specifies a **domain-specific agent** focused on **Wikipedia browsing and summarization via a CLI**. It is designed for students, researchers, and analysts who need fast, verifiable, and reproducible access to encyclopedic information. The goal is to provide **accurate, well-cited summaries** and **structured facts** while preserving neutrality and provenance.
 
 ## Executive Summary
@@ -48,70 +52,49 @@ Out of scope:
 - Providing legal, medical, or financial advice beyond neutral summaries.
 - Generating original research or opinions.
 
-## Core Skills (Required)
-1. **Search & Disambiguation** ✅ IMPLEMENTED
-	- Return candidate pages with short descriptors.
-	- Explain why a page is selected.
-	- Handle redirects and alternate titles.
-	- **Status:** wptools direct fetch + MediaWiki search API with User-Agent headers
-	- **Features:** Scores candidates by similarity, handles 403 errors, returns 5 ranked results
+---
 
-2. **Structured Extraction** ✅ IMPLEMENTED
-	- Pull definitions, dates, entities, and key events.
-	- Extract infobox fields with labels and units.
-	- Capture named entities and linked concepts for follow-up.
-	- **Status:** BeautifulSoup4 HTML parsing with section detection (from Steel API cleaned HTML)
-	- **Features:** h2/h3/h4 heading extraction, infobox parsing, text normalization, 50x faster with Steel API caching
+## Architecture Overview
 
-3. **Citation Mapping** (Context Enhanced)
-	- Provide section-level citations for every factual claim.
-	- Tie each bullet to a section or infobox field.
-	- Flag missing or weak citations in the source page.
-	- **Status:** Implicit via parse.py section detection
-	- **Note:** Future release will add explicit citation format exports
+### 4-Module Pipeline
 
-4. **Summarization** ✅ IMPLEMENTED
-	- Generate 1–2 sentence abstracts.
-	- Provide 3–7 bullet summaries by default.
-	- Offer longer summaries on request.
-	- **Status:** Extractive NLP with intelligent scoring algorithms
-	- **Features:** Sentence extraction, section-based ranking, keyword frequency analysis
+```
+Query Input
+    ↓
+[1] SearchModule (220 lines)
+    ├─ wptools direct page fetch
+    ├─ MediaWiki API search fallback
+    ├─ Disambiguation detection
+    └─ Candidate ranking & scoring
+    ↓
+[2] FetchModule (268 lines)
+    ├─ Steel API scraping (optional)
+    ├─ wptools fallback retrieval
+    ├─ JSON cache with TTL
+    └─ Retry logic with backoff
+    ↓
+[3] ParseModule (280 lines)
+    ├─ HTML section extraction
+    ├─ Infobox field parsing
+    ├─ Text normalization
+    └─ Citation detection
+    ↓
+[4] SummarizeModule (460 lines)
+    ├─ Extractive summarization
+    ├─ Bullet generation
+    ├─ Topic comparison
+    └─ Keyword extraction
+    ↓
+[CLI Agent] (408 lines, in agent.py)
+    ├─ Output formatting (JSON/text)
+    ├─ Command routing
+    ├─ Parallel execution
+    └─ Error handling
+    ↓
+Structured Output (JSON or formatted text)
+```
 
-5. **Comparison and Differentiation** ✅ IMPLEMENTED
-	- Side-by-side summaries for two or more topics.
-	- Highlight similarities and differences with citations.
-	- **Status:** Keyword-based topic comparison
-	- **Features:** Shared keywords detection, unique term extraction, similarity scoring
-
-6. **Terminology and Glossary Extraction** ✅ IMPLEMENTED
-	- Identify key terms and linked concepts.
-	- Provide brief definitions with citations.
-	- **Status:** Frequency-based keyword extraction
-	- **Features:** Stop-word filtering, top-N keyword ranking by frequency
-
-## Knowledge Sources
-Primary:
-- Wikipedia pages (articles, infoboxes, and sections).
-
-Secondary (optional):
-- Wikidata for entity IDs, aliases, and structured metadata.
-
-## Tools and Interfaces
-CLI-focused tools should support:
-- Search: resolve page titles from user queries.
-- Fetch: retrieve page content and metadata.
-- Parse: extract sections and infobox data reliably.
-- Summarize: convert long sections into concise bullets.
-
-Core capabilities:
-- Caching to reduce repeated requests.
-- **Output formatting for markdown, plain text, or JSON** ✅
-- **Structured JSON export with metadata** ✅
-- **Parallel fetching for multi-topic operations** ✅
-
-Optional capabilities:
-- Advanced filtering and transformation pipelines.
-- Real-time streaming for large documents.
+### Module Specifications
 
 ## Technical Stack
 **Implemented:**

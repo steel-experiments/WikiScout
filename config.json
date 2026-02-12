@@ -1,0 +1,11 @@
+{
+  "wikipedia_lang": "en",
+  "cache_dir": "./cache",
+  "cache_ttl_seconds": 3600,
+  "timeout_seconds": 30,
+  "max_retries": 3,
+  "rate_limit_delay_ms": 500,
+  "default_summary_bullets": 5,
+  "log_level": "INFO",
+  "user_agent": "WikipediaAgent/1.1 (Educational; +https://example.com)"
+}

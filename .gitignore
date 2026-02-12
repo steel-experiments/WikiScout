@@ -1,0 +1,12 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Caches and logs
+cache/
+.cache/
+.pytest_cache/
+agent.log
+
+# Test run cache (kept in repo if needed)
+# test_cache/

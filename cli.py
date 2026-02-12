@@ -10,6 +10,7 @@ Usage:
     wikiscout compare "Python" "JavaScript"
 """
 
+import asyncio
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -17,7 +18,7 @@ from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
 from rich.markdown import Markdown
-from typing import Optional
+from typing import List
 import json
 from datetime import datetime
 
@@ -32,6 +33,7 @@ app = typer.Typer(
 
 # Create Rich console
 console = Console()
+COMPACT_MODE = False
 
 # Initialize agent
 agent = WikipediaAgent()
@@ -39,6 +41,9 @@ agent = WikipediaAgent()
 
 def print_header(title: str):
     """Print a styled header"""
+    if COMPACT_MODE:
+        console.print(f"[bold cyan]{title}[/bold cyan]")
+        return
     console.print(Panel.fit(
         f"[bold cyan]{title}[/bold cyan]",
         border_style="cyan",
@@ -60,6 +65,24 @@ def print_json_syntax(data: dict):
     json_str = json.dumps(data, indent=2, ensure_ascii=False)
     syntax = Syntax(json_str, "json", theme="monokai", line_numbers=False)
     console.print(syntax)
+
+
+def gap():
+    """Print a blank line unless compact mode is enabled."""
+    if not COMPACT_MODE:
+        console.print()
+
+
+@app.callback()
+def configure_output(
+    compact: bool = typer.Option(False, "--compact", help="Compact output"),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable color output"),
+):
+    """Configure global output settings."""
+    global console, COMPACT_MODE
+    COMPACT_MODE = compact
+    if no_color:
+        console = Console(no_color=True, color_system=None)
 
 
 @app.command()
@@ -100,7 +123,7 @@ def search(
         return
     
     print_success(f"Found {len(candidates_list)} articles")
-    console.print()
+    gap()
     
     for i, candidate in enumerate(candidates_list, 1):
         # Create table for each result
@@ -113,8 +136,13 @@ def search(
         table.add_row("URL", f"[link={candidate['url']}]{candidate['url']}[/link]")
         table.add_row("Page ID", str(candidate.get('pageid', 'N/A')))
         
-        console.print(Panel(table, title=f"[bold]Result {i}[/bold]", border_style="blue"))
-        console.print()
+        if COMPACT_MODE:
+            console.print(f"[bold]Result {i}[/bold]")
+            console.print(table)
+            gap()
+        else:
+            console.print(Panel(table, title=f"[bold]Result {i}[/bold]", border_style="blue"))
+            gap()
 
 
 @app.command()
@@ -153,14 +181,14 @@ def summarize(
     source_url = result.get("source_url", "")
     
     print_success(f"Summarized: {title}")
-    console.print()
+    gap()
     
     # Summary bullets
     console.print("[bold cyan]Key Points:[/bold cyan]")
     for i, bullet in enumerate(summary_list, 1):
         console.print(f"  [bold]{i}.[/bold] {bullet}")
     
-    console.print()
+    gap()
     console.print(f"[dim]Source: {source_url}[/dim]")
 
 
@@ -202,21 +230,25 @@ def compare(
     
     # Similarities
     if similarities:
-        console.print("\n[bold green]✓ Similarities:[/bold green]")
+        gap()
+        console.print("[bold green]✓ Similarities:[/bold green]")
         for sim in similarities:
             console.print(f"  • {sim}")
     else:
-        console.print("\n[yellow]No clear similarities found[/yellow]")
+        gap()
+        console.print("[yellow]No clear similarities found[/yellow]")
     
     # Differences
     if differences:
-        console.print("\n[bold yellow]⚡ Differences:[/bold yellow]")
+        gap()
+        console.print("[bold yellow]⚡ Differences:[/bold yellow]")
         for diff in differences:
             console.print(f"  • {diff}")
     else:
-        console.print("\n[yellow]No clear differences found[/yellow]")
-    
-    console.print()
+        gap()
+        console.print("[yellow]No clear differences found[/yellow]")
+
+    gap()
 
 
 @app.command()
@@ -271,7 +303,7 @@ def infobox(
         return
     
     print_success(f"Extracted {len(infobox_data)} fields")
-    console.print()
+    gap()
     
     # Create table
     table = Table(show_header=True, header_style="bold cyan")
@@ -281,6 +313,90 @@ def infobox(
     for key, value in infobox_data.items():
         table.add_row(key, str(value))
     
+    console.print(table)
+
+
+@app.command()
+def batch(
+    titles: List[str] = typer.Argument(..., help="Article titles (space-separated)"),
+    use_cache: bool = typer.Option(True, "--cache/--no-cache", help="Use cache when available"),
+    format: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+):
+    """
+    📦 Fetch multiple Wikipedia pages in parallel
+    """
+    print_header(f"Batch fetch ({len(titles)} pages)")
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task("Fetching pages...", total=None)
+        results = asyncio.run(agent.async_fetch_module.fetch_pages_batch(titles, use_cache=use_cache))
+        progress.remove_task(task)
+
+    successful = [r for r in results if r.get("success")]
+    failed = [r for r in results if not r.get("success")]
+
+    if format == "json":
+        payload = {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "count": len(results),
+            "results": results,
+        }
+        print_json_syntax(payload)
+        return
+
+    print_success(f"Fetched {len(successful)}/{len(results)} pages")
+    if failed:
+        print_error(f"Failed: {len(failed)}")
+    gap()
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Status", style="cyan", width=7)
+    table.add_column("Title", style="bold")
+    table.add_column("URL")
+    table.add_column("Error")
+
+    for result in results:
+        status = "OK" if result.get("success") else "ERR"
+        title = result.get("title", "")
+        url = result.get("url", "")
+        error = "" if result.get("success") else result.get("error", "Unknown error")
+        table.add_row(status, title, url, error)
+
+    console.print(table)
+
+
+@app.command()
+def health(
+    format: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+):
+    """
+    ❤️  Quick health check
+    """
+    print_header("Health Check")
+
+    result = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.1.0",
+        "cache_status": "active",
+    }
+
+    if format == "json":
+        print_json_syntax(result)
+        return
+
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="cyan bold")
+    table.add_column("Value", style="green")
+    table.add_row("Status", "[green]✓ Healthy[/green]")
+    table.add_row("Timestamp", result["timestamp"])
+    table.add_row("Version", result["version"])
+    table.add_row("Cache", result["cache_status"])
     console.print(table)
 
 

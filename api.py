@@ -8,7 +8,7 @@ Run: uvicorn api:app --reload
 Docs: http://localhost:8000/docs
 """
 
-from fastapi import FastAPI, HTTPException, Query, Path
+from fastapi import FastAPI, HTTPException, Query, Path, Response
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -35,6 +35,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("WikiScout API shutting down...")
 
 
+openapi_tags = [
+    {"name": "General", "description": "Service metadata and health checks."},
+    {"name": "Search", "description": "Search Wikipedia pages by query."},
+    {"name": "Summarize", "description": "Summarize a Wikipedia article."},
+    {"name": "Compare", "description": "Compare two Wikipedia topics."},
+    {"name": "Batch", "description": "Batch fetch multiple pages in parallel."},
+]
+
+
 # Create FastAPI app
 app = FastAPI(
     title="WikiScout API",
@@ -43,6 +52,7 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
+    openapi_tags=openapi_tags,
     contact={
         "name": "WikiScout",
         "url": "https://github.com/steel-experiments/WikiScout",
@@ -79,6 +89,8 @@ class SearchResponse(BaseModel):
     timestamp: str = Field(..., description="ISO 8601 timestamp")
     candidates: List[Candidate] = Field(..., description="List of candidate pages")
     count: int = Field(..., description="Number of candidates found")
+    offset: int = Field(..., ge=0, description="Result offset for pagination")
+    limit: int = Field(..., ge=1, le=20, description="Max results returned")
 
 
 class SummaryResponse(BaseModel):
@@ -131,7 +143,32 @@ class BatchResponse(BaseModel):
 
 
 # Endpoints
-@app.get("/", tags=["General"])
+@app.get(
+    "/",
+    tags=["General"],
+    responses={
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "name": "WikiScout API",
+                        "version": "1.1.0",
+                        "description": "Fast Wikipedia research agent",
+                        "docs": "/docs",
+                        "health": "/health",
+                        "endpoints": {
+                            "search": "/search/{query}",
+                            "summarize": "/summarize/{query}",
+                            "compare": "/compare",
+                            "batch": "/batch",
+                            "status": "/status",
+                        },
+                    }
+                }
+            }
+        }
+    },
+)
 async def read_root():
     """API root endpoint with basic information"""
     return {
@@ -150,9 +187,28 @@ async def read_root():
     }
 
 
-@app.get("/health", response_model=HealthResponse, tags=["General"])
-async def health_check():
+@app.get(
+    "/health",
+    response_model=HealthResponse,
+    tags=["General"],
+    responses={
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "healthy",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "version": "1.1.0",
+                        "cache_status": "active",
+                    }
+                }
+            }
+        }
+    },
+)
+async def health_check(response: Response):
     """Health check endpoint"""
+    response.headers["Cache-Control"] = "no-store"
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
@@ -167,13 +223,39 @@ async def health_check():
     tags=["Search"],
     summary="Search Wikipedia",
     responses={
-        200: {"description": "Successful search results"},
+        200: {
+            "description": "Successful search results",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "query": "Python programming",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "candidates": [
+                            {
+                                "title": "Python_(programming_language)",
+                                "url": "https://en.wikipedia.org/wiki/Python_(programming_language)",
+                                "description": "High-level programming language...",
+                                "score": 1.0,
+                                "disambiguation": False,
+                                "pageid": 23862,
+                            }
+                        ],
+                        "count": 1,
+                        "offset": 0,
+                        "limit": 5,
+                    }
+                }
+            },
+        },
         500: {"model": ErrorResponse, "description": "Internal server error"},
     }
 )
 async def search_wikipedia(
+    response: Response,
     query: str = Path(..., description="Search query", min_length=1),
     candidates: int = Query(5, ge=1, le=20, description="Number of candidates to return"),
+    offset: int = Query(0, ge=0, description="Offset for pagination"),
 ):
     """
     Search Wikipedia for articles matching the query.
@@ -188,13 +270,17 @@ async def search_wikipedia(
             raise HTTPException(status_code=404, detail=result.get("error", "Not found"))
         
         candidates_list = result.get("candidates", [])
+        paged_candidates = candidates_list[offset:offset + candidates]
+        response.headers["Cache-Control"] = "public, max-age=300"
         
         return {
             "status": "success",
             "query": query,
             "timestamp": result.get("timestamp", datetime.now().isoformat()),
-            "candidates": candidates_list,
-            "count": len(candidates_list),
+            "candidates": paged_candidates,
+            "count": len(paged_candidates),
+            "offset": offset,
+            "limit": candidates,
         }
     except HTTPException:
         raise
@@ -208,8 +294,28 @@ async def search_wikipedia(
     response_model=SummaryResponse,
     tags=["Summarize"],
     summary="Summarize Wikipedia article",
+    responses={
+        200: {
+            "description": "Summary response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "title": "Machine_learning",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "summary": ["Point 1", "Point 2"],
+                        "source_url": "https://en.wikipedia.org/wiki/Machine_learning",
+                        "bullets_requested": 2,
+                        "bullets_returned": 2,
+                    }
+                }
+            },
+        },
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
 )
 async def summarize_article(
+    response: Response,
     query: str = Path(..., description="Article title or search query", min_length=1),
     bullets: int = Query(5, ge=1, le=20, description="Number of summary bullets"),
 ):
@@ -226,6 +332,7 @@ async def summarize_article(
             raise HTTPException(status_code=404, detail=result.get("error", "Article not found"))
         
         summary_list = result.get("summary", [])
+        response.headers["Cache-Control"] = "public, max-age=300"
         
         return {
             "status": "success",
@@ -248,8 +355,29 @@ async def summarize_article(
     response_model=ComparisonResponse,
     tags=["Compare"],
     summary="Compare two Wikipedia topics",
+    responses={
+        200: {
+            "description": "Comparison response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "topic1": "Python",
+                        "topic2": "JavaScript",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "comparison": {
+                            "similarities": ["Both are popular languages"],
+                            "differences": ["Python is dynamically typed"],
+                        },
+                    }
+                }
+            },
+        },
+        500: {"model": ErrorResponse, "description": "Internal server error"},
+    },
 )
 async def compare_topics(
+    response: Response,
     topic1: str = Query(..., description="First topic", min_length=1),
     topic2: str = Query(..., description="Second topic", min_length=1),
     bullets: int = Query(5, ge=1, le=20, description="Number of comparison points"),
@@ -266,6 +394,7 @@ async def compare_topics(
         if result.get("status") == "error":
             raise HTTPException(status_code=404, detail=result.get("error", "Topics not found"))
         
+        response.headers["Cache-Control"] = "public, max-age=300"
         return {
             "status": "success",
             "topic1": result.get("topic1", topic1),
@@ -280,8 +409,31 @@ async def compare_topics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/status", tags=["General"])
-async def get_status():
+@app.get(
+    "/status",
+    tags=["General"],
+    responses={
+        200: {
+            "description": "Status response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "operational",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "version": "1.1.0",
+                        "cache": {
+                            "directory": "cache",
+                            "files": 10,
+                            "size_bytes": 12345,
+                            "size_mb": 0.01,
+                        },
+                    }
+                }
+            },
+        }
+    },
+)
+async def get_status(response: Response):
     """Get agent status and cache statistics"""
     try:
         # Get cache directory size
@@ -290,6 +442,7 @@ async def get_status():
         cache_files = len(list(cache_dir.glob("*.json"))) if cache_dir.exists() else 0
         cache_size = sum(f.stat().st_size for f in cache_dir.glob("*.json")) if cache_dir.exists() else 0
         
+        response.headers["Cache-Control"] = "no-store"
         return {
             "status": "operational",
             "timestamp": datetime.now().isoformat(),
@@ -316,8 +469,26 @@ async def get_status():
     response_model=BatchResponse,
     tags=["Batch"],
     summary="Fetch multiple Wikipedia pages in parallel",
+    responses={
+        200: {
+            "description": "Batch response",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "success",
+                        "timestamp": "2026-02-12T21:00:00",
+                        "count": 2,
+                        "results": [
+                            {"success": True, "title": "Python"},
+                            {"success": False, "title": "Missing", "error": "Page not found"},
+                        ],
+                    }
+                }
+            },
+        }
+    },
 )
-async def batch_fetch(payload: BatchRequest):
+async def batch_fetch(payload: BatchRequest, response: Response):
     """
     Fetch multiple Wikipedia pages in parallel for high performance.
 
@@ -329,6 +500,7 @@ async def batch_fetch(payload: BatchRequest):
     try:
         logger.info(f"API Batch: {len(payload.titles)} titles")
         results = await agent.fetch_pages_async(payload.titles, use_cache=payload.use_cache)
+        response.headers["Cache-Control"] = "public, max-age=300"
         return {
             "status": "success",
             "timestamp": datetime.now().isoformat(),

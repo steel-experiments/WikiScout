@@ -34,6 +34,9 @@ async def test_search_endpoint(monkeypatch):
     assert data["status"] == "success"
     assert data["count"] == 1
     assert data["candidates"][0]["title"] == "Python"
+    assert data["offset"] == 0
+    assert data["limit"] == 1
+    assert response.headers.get("cache-control") == "public, max-age=300"
 
 
 @pytest.mark.asyncio
@@ -58,6 +61,7 @@ async def test_summarize_endpoint(monkeypatch):
     assert data["status"] == "success"
     assert data["bullets_requested"] == 2
     assert data["bullets_returned"] == 2
+    assert response.headers.get("cache-control") == "public, max-age=300"
 
 
 @pytest.mark.asyncio
@@ -84,6 +88,7 @@ async def test_compare_endpoint(monkeypatch):
     data = response.json()
     assert data["status"] == "success"
     assert data["comparison"]["similarities"] == ["Similar A"]
+    assert response.headers.get("cache-control") == "public, max-age=300"
 
 
 @pytest.mark.asyncio

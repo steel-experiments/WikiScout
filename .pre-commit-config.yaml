@@ -1,0 +1,58 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.1.15
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.8.0
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-beautifulsoup4
+          - types-requests
+        args: [--ignore-missing-imports, --no-strict-optional]
+        files: ^(modules/|agent\.py)
+
+  - repo: https://github.com/python-poetry/poetry
+    rev: 1.7.0
+    hooks:
+      - id: poetry-check
+        files: ^pyproject\.toml$
+
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest-fast
+        entry: pytest
+        language: system
+        pass_filenames: false
+        args: ['-v', '--tb=short', '-x']
+        stages: [pre-push]
+
+# Configuration
+default_language_version:
+  python: python3.12
+
+# Run specific hooks
+# pre-commit run <hook-id>
+
+# Skip specific hooks
+# SKIP=mypy git commit -m "message"

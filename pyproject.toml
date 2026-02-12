@@ -30,20 +30,30 @@ dependencies = [
     "beautifulsoup4>=4.12.2",
     "click>=8.1.7",
     "requests>=2.31.0",
+    "httpx>=0.26.0",  # Async HTTP client
+    "aiofiles>=23.2.1",  # Async file I/O
+    "typer[all]>=0.9.0",  # Modern CLI with Rich built-in
+    "rich>=13.7.0",  # Beautiful terminal output
+    "fastapi>=0.109.0",  # Modern async web framework
+    "uvicorn[standard]>=0.27.0",  # ASGI server
+    "pydantic>=2.5.0",  # Data validation
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.4.3",
     "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.3",  # Test async code
     "mypy>=1.8.0",
     "ruff>=0.1.0",
     "types-beautifulsoup4>=4.12.0",
     "types-requests>=2.31.0",
+    "httpx>=0.26.0",  # For testing
 ]
 test = [
     "pytest>=7.4.3",
     "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.3",
 ]
 lint = [
     "mypy>=1.8.0",

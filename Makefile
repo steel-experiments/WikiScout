@@ -43,16 +43,22 @@ clean:  ## Clean up cache and build artifacts
 	find . -type f -name '*.pyo' -delete
 
 run-search:  ## Quick test: Search for Python programming
-	python agent.py search -q "Python programming"
+	python cli.py search "Python programming"
 
 run-summary:  ## Quick test: Summarize Machine Learning
-	python agent.py summarize -q "Machine Learning" --bullets 5
+	python cli.py summarize "Machine Learning" --bullets 5
 
 run-compare:  ## Quick test: Compare Python vs JavaScript
-	python agent.py compare -t1 "Python" -t2 "JavaScript" --bullets 3
+	python cli.py compare --topic1 "Python" --topic2 "JavaScript" --bullets 3
 
 run-example:  ## Run test examples
 	python test_example.py
+
+run-api:  ## Start FastAPI server
+	uvicorn api:app --reload
+
+run-api-prod:  ## Start FastAPI server (production)
+	uvicorn api:app --host 0.0.0.0 --port 8000
 
 docker-build:  ## Build Docker image
 	docker build -t wikiscout:latest .

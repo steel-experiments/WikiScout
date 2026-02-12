@@ -12,6 +12,7 @@ import logging
 import re
 from typing import List, Dict, Optional
 from collections import Counter
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,22 @@ class SummarizeModule:
         self.config = config
         self.default_bullets = config.get("default_summary_bullets", 5)
         logger.info(f"  [OK] SummarizeModule initialized (default bullets={self.default_bullets})")
+    
+    def _clean_html_text(self, text: str) -> str:
+        """
+        Clean HTML tags from text while preserving content.
+        """
+        if not text:
+            return ""
+        
+        try:
+            soup = BeautifulSoup(text, 'html.parser')
+            clean_text = soup.get_text(separator=' ', strip=True)
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            clean_text = re.sub(r'\[.*?\]', '', clean_text)  # Remove [citations]
+            return clean_text
+        except:
+            return text
     
     def generate_abstract(self, content: Dict) -> str:
         """
@@ -220,7 +237,11 @@ class SummarizeModule:
         """
         Extract the most important sentence from text using content analysis.
         Prefers sentences with facts, numbers, or specific keywords.
+        Cleans HTML tags from result.
         """
+        # Clean HTML first
+        text = self._clean_html_text(text)
+        
         sentences = self._split_sentences(text)
         if not sentences:
             return ""

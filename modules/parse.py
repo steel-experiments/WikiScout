@@ -24,15 +24,47 @@ class ParseModule:
         self.config = config
         logger.info(f"  [OK] ParseModule initialized")
     
+    def clean_html_text(self, text: str) -> str:
+        """
+        Clean HTML tags from text while preserving content.
+        
+        Args:
+            text: Text that may contain HTML tags
+        
+        Returns:
+            Clean text without HTML tags
+        """
+        if not text:
+            return ""
+        
+        try:
+            # Use BeautifulSoup to extract clean text
+            soup = BeautifulSoup(text, 'html.parser')
+            clean_text = soup.get_text(separator=' ', strip=True)
+            
+            # Remove extra whitespace
+            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+            
+            # Remove common Wikipedia artifacts
+            clean_text = re.sub(r'\[.*?\]', '', clean_text)  # Remove [citations]
+            clean_text = re.sub(r'[edit]', '', clean_text)     # Remove [edit] markers
+            
+            return clean_text
+        except Exception as e:
+            logger.warning(f"  [WARN] HTML cleaning error: {str(e)}")
+            return text
+    
+    
     def extract_sections(self, html_content: str) -> List[Dict]:
         """
         Extract sections from Wikipedia HTML content using BeautifulSoup.
+        Properly cleans HTML tags from all extracted text.
         
         Args:
             html_content: Raw HTML from Wikipedia
         
         Returns:
-            List of sections with headings and text
+            List of sections with clean headings and text
         """
         logger.info(f"  [PARSE] Extracting sections from HTML ({len(html_content)} chars)")
         
@@ -48,6 +80,7 @@ class ParseModule:
             for element in soup.find_all(['h2', 'h3', 'h4', 'p']):
                 if element.name in ['h2', 'h3', 'h4']:
                     level = int(element.name[1])
+                    # Get clean text from heading
                     text = element.get_text(strip=True)
                     
                     if '[edit]' in text:
@@ -66,15 +99,18 @@ class ParseModule:
                         sections.append(current_section)
                         
                 elif element.name == 'p' and current_section is not None:
+                    # Extract clean text from paragraph
                     para_text = element.get_text(strip=True)
                     if para_text:
                         current_section["paragraphs"].append(para_text)
                         if not current_section["text"]:
                             current_section["text"] = para_text[:200]
             
-            # Combine paragraphs into full text
+            # Combine paragraphs into full text and clean
             for section in sections:
-                section["text"] = " ".join(section.get("paragraphs", []))[:500]
+                full_text = " ".join(section.get("paragraphs", []))
+                # Clean any remaining HTML artifacts
+                section["text"] = self.clean_html_text(full_text)[:500]
             
             logger.info(f"  [OK] Extracted {len(sections)} section(s)")
             return sections

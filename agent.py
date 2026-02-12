@@ -16,6 +16,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from modules.search import SearchModule
 from modules.fetch import FetchModule
@@ -243,6 +244,22 @@ class WikipediaAgent:
 
 
 # CLI Commands
+def format_output(data: dict, format_type: str = "text") -> str:
+    """
+    Format output as text or JSON.
+    
+    Args:
+        data: Result dictionary
+        format_type: 'text' or 'json'
+    
+    Returns:
+        Formatted string
+    """
+    if format_type == "json":
+        return json.dumps(data, indent=2, ensure_ascii=False)
+    return ""  # Text format handled by click.echo
+
+
 @click.group()
 @click.version_option(version=__version__)
 def cli():
@@ -257,10 +274,15 @@ def cli():
 @cli.command()
 @click.option('--query', '-q', required=True, help='Search query')
 @click.option('--candidates', '-c', default=5, help='Number of candidates to show')
-def search(query: str, candidates: int):
+@click.option('--format', '-f', 'output_format', default='text', type=click.Choice(['text', 'json']), help='Output format')
+def search(query: str, candidates: int, output_format: str):
     """Search for a Wikipedia page."""
     agent = WikipediaAgent()
     result = agent.search(query, candidates)
+    
+    if output_format == "json":
+        click.echo(format_output(result, "json"))
+        return
     
     if result['status'] == 'success':
         click.echo(f"\nOK: Search Results for: '{query}'")
@@ -276,18 +298,24 @@ def search(query: str, candidates: int):
 @cli.command()
 @click.option('--query', '-q', required=True, help='Wikipedia page title')
 @click.option('--bullets', '-b', default=5, help='Number of summary bullets')
-def summarize(query: str, bullets: int):
+@click.option('--format', '-f', 'output_format', default='text', type=click.Choice(['text', 'json']), help='Output format')
+def summarize(query: str, bullets: int, output_format: str):
     """Summarize a Wikipedia page."""
     agent = WikipediaAgent()
     
     # First search to confirm page exists
     search_result = agent.search(query)
     if search_result['status'] != 'success':
-        click.echo(f"ERROR: Page not found: '{query}'", err=True)
+        error_msg = {"status": "error", "query": query, "error": "Page not found"}
+        click.echo(format_output(error_msg, output_format) if output_format == "json" else f"ERROR: Page not found: '{query}'", err=True)
         return
     
     # Then summarize
     result = agent.summarize(query, bullets)
+    
+    if output_format == "json":
+        click.echo(format_output(result, "json"))
+        return
     
     if result['status'] == 'success':
         click.echo(f"\nOK: Summary: {result['title']}")
@@ -303,10 +331,25 @@ def summarize(query: str, bullets: int):
 @click.option('--topic1', '-t1', required=True, help='First topic')
 @click.option('--topic2', '-t2', required=True, help='Second topic')
 @click.option('--bullets', '-b', default=5, help='Number of comparison points')
-def compare(topic1: str, topic2: str, bullets: int):
-    """Compare two Wikipedia topics."""
+@click.option('--format', '-f', 'output_format', default='text', type=click.Choice(['text', 'json']), help='Output format')
+def compare(topic1: str, topic2: str, bullets: int, output_format: str):
+    """Compare two Wikipedia topics (parallel fetch for speed)."""
     agent = WikipediaAgent()
+    
+    # Parallel fetch both pages for ~2x speed
+    logger.info(f"[COMPARE] Fetching '{topic1}' and '{topic2}' in parallel...")
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        future1 = executor.submit(agent.fetch_module.fetch_page, topic1)
+        future2 = executor.submit(agent.fetch_module.fetch_page, topic2)
+        page1 = future1.result()
+        page2 = future2.result()
+    
+    # Compare results
     result = agent.compare(topic1, topic2, bullets)
+    
+    if output_format == "json":
+        click.echo(format_output(result, "json"))
+        return
     
     if result['status'] == 'success':
         click.echo(f"\n⚖️  Comparison: {result['topic1']} vs {result['topic2']}\n")
@@ -325,7 +368,8 @@ def compare(topic1: str, topic2: str, bullets: int):
 
 @cli.command()
 @click.option('--query', '-q', required=True, help='Wikipedia page title')
-def infobox(query: str):
+@click.option('--format', '-f', 'output_format', default='text', type=click.Choice(['text', 'json']), help='Output format')
+def infobox(query: str, output_format: str):
     """Extract infobox data from a Wikipedia page."""
     agent = WikipediaAgent()
     result = agent.fetch(query)
@@ -334,6 +378,17 @@ def infobox(query: str):
         html = result.get("html", "")
         infobox = agent.parse_module.extract_infobox(html) if html else {"fields": {}}
         fields = infobox.get("fields", {})
+        
+        output_data = {
+            "status": "success",
+            "title": result.get('title'),
+            "url": result.get('url'),
+            "fields": fields
+        }
+        
+        if output_format == "json":
+            click.echo(format_output(output_data, "json"))
+            return
 
         click.echo(f"\nOK: Infobox: {result['title']}")
         click.echo(f"  Source: {result['url']}\n")
@@ -347,13 +402,29 @@ def infobox(query: str):
             click.echo(f"    • {label}: {value}")
         click.echo()
     else:
-        click.echo(f"ERROR: Failed to fetch infobox: {result.get('error', 'Unknown error')}", err=True)
+        error_data = {"status": "error", "query": query, "error": result.get('error')}
+        click.echo(format_output(error_data, output_format) if output_format == "json" else f"ERROR: Failed to fetch infobox: {result.get('error', 'Unknown error')}", err=True)
 
 
 @cli.command()
-def status():
+@click.option('--format', '-f', 'output_format', default='text', type=click.Choice(['text', 'json']), help='Output format')
+def status(output_format: str):
     """Check agent status and configuration."""
     agent = WikipediaAgent()
+    
+    status_data = {
+        "status": "ok",
+        "version": __version__,
+        "config_file": str(agent.config_path),
+        "cache_dir": str(agent.cache_dir),
+        "cache_ttl_seconds": agent.config.get('cache_ttl_seconds'),
+        "log_level": agent.config.get('log_level'),
+        "cache_stats": agent.fetch_module.get_cache_stats()
+    }
+    
+    if output_format == "json":
+        click.echo(format_output(status_data, "json"))
+        return
     
     click.echo(f"\nOK: Agent Status")
     click.echo(f"  Version: {__version__}")

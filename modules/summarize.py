@@ -64,6 +64,7 @@ class SummarizeModule:
     def generate_bullets(self, sections: List[Dict], num_bullets: int) -> List[Dict]:
         """
         Generate bullet point summary from sections using extractive summarization.
+        Prioritizes informative content and avoids sparse/generic bullets.
         
         Args:
             sections: List of page sections
@@ -89,64 +90,201 @@ class SummarizeModule:
         
         scored_sections.sort(key=lambda x: x[0], reverse=True)
         
-        for i, (score, section) in enumerate(scored_sections[:num_bullets]):
+        # Extract key sentences first
+        section_bullets = []
+        for i, (score, section) in enumerate(scored_sections):
             heading = section.get('heading', 'Section')
             text = section.get('text', '')
             
             key_sentence = self._extract_key_sentence(text, heading)
             
-            bullet = {
-                "text": key_sentence if key_sentence else f"Key point from {heading}",
-                "section": heading,
-                "section_id": section.get('html_id', ''),
-                "score": score
-            }
-            bullets.append(bullet)
+            # Quality check: reject generic or empty bullets
+            if key_sentence and not self._is_generic_bullet(key_sentence):
+                bullet = {
+                    "text": key_sentence,
+                    "section": heading,
+                    "section_id": section.get('html_id', ''),
+                    "score": score,
+                    "quality": "high"
+                }
+                section_bullets.append(bullet)
+                
+                if len(section_bullets) >= num_bullets:
+                    break
+        
+        # If we have enough high-quality bullets, use them
+        if len(section_bullets) >= num_bullets:
+            bullets = section_bullets[:num_bullets]
+        else:
+            # Fallback: use section headings as bullets for remaining slots
+            remaining = num_bullets - len(section_bullets)
+            bullets = section_bullets
+            
+            for i, (score, section) in enumerate(scored_sections[len(section_bullets):]):
+                if len(bullets) >= num_bullets:
+                    break
+                
+                heading = section.get('heading', 'Section')
+                if heading.lower() not in ['references', 'see also', 'notes', 'external links']:
+                    text = section.get('text', '')[:100]
+                    bullet = {
+                        "text": f"{heading}: {text}",
+                        "section": heading,
+                        "section_id": section.get('html_id', ''),
+                        "score": score,
+                        "quality": "medium"
+                    }
+                    bullets.append(bullet)
         
         logger.info(f"  [OK] Generated {len(bullets)} bullet(s)")
         return bullets
     
+    def _is_generic_bullet(self, text: str) -> bool:
+        """
+        Check if bullet text is too generic or placeholder-like.
+        """
+        generic_patterns = [
+            r'^key point', r'^relates to', r'^involves',
+            r'^mentioned in', r'^also known as',
+            r'^more information', r'^further details'
+        ]
+        
+        text_lower = text.lower()
+        return any(re.match(pattern, text_lower) for pattern in generic_patterns)
+    
     def _score_section(self, section: Dict) -> float:
         """
-        Score a section based on content quality.
+        Score a section based on content quality and informativeness.
+        Prioritizes specific, fact-rich content over generic introductions.
         """
         text = section.get('text', '')
         heading = section.get('heading', '')
         
-        length_score = min(10, len(text.split()) / 20)
+        # Skip low-value sections
+        skip_headings = {'references', 'see also', 'notes', 'external links', 'gallery', 'infobox'}
+        if heading.lower() in skip_headings:
+            return -100
         
+        # Base length score (prefer meaty paragraphs)
+        word_count = len(text.split())
+        length_score = min(15, word_count / 15)
+        
+        # Diversity score (varied vocabulary = better content)
         words = text.lower().split()
         unique_ratio = len(set(words)) / max(len(words), 1)
-        diversity_score = unique_ratio * 10
+        diversity_score = unique_ratio * 12
         
+        # Fact indicators (numbers, dates, names = specific content)
         has_numbers = bool(re.search(r'\d{1,4}', text))
-        number_score = 3 if has_numbers else 0
+        number_score = 5 if has_numbers else 0
         
-        intro_boost = 2 if heading.lower() in ['introduction', 'overview', 'summary'] else 0
+        has_years = bool(re.search(r'\b(19|20)\d{2}\b', text))
+        year_score = 4 if has_years else 0
         
-        return length_score + diversity_score + number_score + intro_boost
+        # Content quality markers
+        content_keywords = {
+            'developed': 2, 'created': 2, 'discovered': 2, 'founded': 2,
+            'invented': 3, 'pioneered': 3, 'revolutionized': 3,
+            'major': 1, 'important': 1, 'significant': 2, 'critical': 2,
+            'however': 1, 'unlike': 2, 'difference': 2, 'distinction': 2
+        }
+        
+        content_score = sum(
+            count for keyword, count in content_keywords.items() 
+            if keyword in text.lower()
+        )
+        
+        # Section-type bonuses
+        intro_boost = 0
+        if heading.lower() in ['introduction', 'overview', 'background', 'history']:
+            intro_boost = 3
+        
+        career_boost = 0
+        if heading.lower() in ['early life', 'career', 'works', 'achievements', 'legacy']:
+            career_boost = 2
+        
+        # Calculate total score
+        total_score = (
+            length_score + 
+            diversity_score + 
+            number_score + 
+            year_score + 
+            content_score + 
+            intro_boost + 
+            career_boost
+        )
+        
+        return total_score
     
     def _extract_key_sentence(self, text: str, context: str = "") -> str:
         """
-        Extract the most important sentence from text.
+        Extract the most important sentence from text using content analysis.
+        Prefers sentences with facts, numbers, or specific keywords.
         """
         sentences = self._split_sentences(text)
         if not sentences:
             return ""
         
+        # Generic patterns to avoid
+        generic_starters = {
+            "key point", "main idea", "important", "also", "further",
+            "however", "therefore", "moreover", "likewise", "additionally"
+        }
+        
         scored = []
         for sent in sentences:
+            sent_lower = sent.lower()
             words = sent.split()
-            if 5 <= len(words) <= 30:
-                context_score = 1
-                if context.lower() in sent.lower():
-                    context_score = 2
-                score = len(set(words)) * context_score
-                scored.append((score, sent))
+            
+            # Skip sentences that are too short or too long
+            if not (5 <= len(words) <= 30):
+                continue
+            
+            # Skip generic sentences
+            if any(sent_lower.startswith(starter) for starter in generic_starters):
+                continue
+            
+            score = 0
+            
+            # Boost score based on sentence quality
+            unique_words = len(set(words))
+            score += unique_words * 0.5  # Diversity bonus
+            
+            # Content quality indicators
+            has_number = bool(re.search(r'\d+', sent))
+            score += 3 if has_number else 0  # Numbers indicate facts
+            
+            has_verb = bool(re.search(r'\b(is|are|was|were|be|have|has|do|does|created|developed|discovered|established|founded)\b', sent_lower))
+            score += 2 if has_verb else 0  # Action verbs indicate substance
+            
+            has_comparison = bool(re.search(r'\b(first|largest|smallest|most|least|unlike|similar|between)\b', sent_lower))
+            score += 2 if has_comparison else 0  # Comparisons are informative
+            
+            # Context matching bonus
+            if context.lower() in sent_lower:
+                score += 5
+            
+            # Penalize overly generic descriptions
+            generic_phrases = {"key point", "relates to", "involves", "mentioned in"}
+            if any(phrase in sent_lower for phrase in generic_phrases):
+                score -= 10
+            
+            scored.append((score, sent))
         
         if scored:
             scored.sort(key=lambda x: x[0], reverse=True)
-            return scored[0][1][:150]
+            best_sent = scored[0][1]
+            # Limit to reasonable length
+            if len(best_sent) > 150:
+                best_sent = best_sent[:150].rsplit(' ', 1)[0] + "..."
+            return best_sent
+        
+        # Fallback: use first substantial sentence
+        for sent in sentences:
+            if len(sent) > 20 and len(sent.split()) >= 5:
+                if len(sent) > 150:
+                    sent = sent[:150].rsplit(' ', 1)[0] + "..."
+                return sent
         
         return sentences[0][:150] if sentences else ""
     
@@ -224,7 +362,8 @@ class SummarizeModule:
     
     def _extract_keywords(self, text: str, top_n: int = 10) -> List[str]:
         """
-        Extract top keywords from text using frequency analysis.
+        Extract top keywords from text using frequency analysis and content quality.
+        Prioritizes meaningful nouns and descriptors over common words.
         """
         if not text:
             return []
@@ -233,18 +372,41 @@ class SummarizeModule:
         text = re.sub(r'[^a-z\s]', ' ', text)
         words = text.split()
         
+        # Comprehensive stop word list
         stop_words = {
             'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
             'have', 'has', 'had', 'do', 'does', 'did', 'in', 'on', 'at',
             'to', 'of', 'and', 'or', 'but', 'not', 'what', 'which', 'who',
             'when', 'where', 'why', 'how', 'all', 'each', 'every', 'both',
-            'few', 'more', 'most', 'such', 'as', 'for', 'from', 'with'
+            'few', 'more', 'most', 'such', 'as', 'for', 'from', 'with',
+            'by', 'that', 'this', 'if', 'no', 'yes', 'it', 'its', 'can',
+            'will', 'would', 'could', 'should', 'may', 'might', 'must',
+            'shall', 'will', 'shall', 'during', 'before', 'after', 'also'
         }
         
-        filtered = [w for w in words if len(w) > 3 and w not in stop_words]
-        counter = Counter(filtered)
-        keywords = [w for w, _ in counter.most_common(top_n)]
+        # Filter words: length > 3, not in stop words, not numeric
+        filtered = [
+            w for w in words 
+            if len(w) > 3 and w not in stop_words and not w.isdigit()
+        ]
         
+        # Boost scoring for meaningful content
+        keyword_weights = {}
+        for word in filtered:
+            # Boost nouns (words ending in -tion, -ment, -ness, -ism, -ity)
+            if any(word.endswith(suffix) for suffix in ['tion', 'ment', 'ness', 'ism', 'ity', 'ble']):
+                keyword_weights[word] = keyword_weights.get(word, 0) + 1.5
+            else:
+                keyword_weights[word] = keyword_weights.get(word, 0) + 1.0
+        
+        # Sort by weighted frequency
+        sorted_keywords = sorted(
+            keyword_weights.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        keywords = [w for w, _ in sorted_keywords[:top_n]]
         return keywords
     
     def extract_glossary(self, content: Dict, num_terms: int = 8) -> List[Dict]:

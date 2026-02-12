@@ -216,7 +216,7 @@ class ParseModule:
             tags.append("disputed")
         
         if len(tags) > 0:
-            logger.warning(f"⚠ Dispute tags detected: {tags}")
+            logger.warning(f"[WARN] Dispute tags detected: {tags}")
         
         return tags
     

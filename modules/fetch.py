@@ -10,11 +10,14 @@ Handles:
 
 import logging
 import json
+import os
 import time
 import wptools
+import requests
 from pathlib import Path
 from typing import Dict, Optional
-from datetime import datetime, timedelta
+from datetime import datetime
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +33,19 @@ class FetchModule:
         self.max_retries = config.get("max_retries", 3)
         self.cache_dir = Path(config.get("cache_dir", "./cache"))
         self.cache_ttl = config.get("cache_ttl_seconds", 3600)
+        self.use_steel_api = config.get("use_steel_api", True)
+        self.steel_api_key = config.get("steel_api_key") or os.environ.get("STEEL_API_KEY")
+        self.steel_api_url = config.get("steel_api_url", "https://api.steel.dev")
+        self.steel_use_proxy = config.get("steel_use_proxy", False)
+        self.steel_delay_ms = config.get("steel_delay_ms", 0)
+        self.steel_scrape_formats = config.get(
+            "steel_scrape_formats", ["cleaned_html", "markdown"]
+        )
         self.cache_dir.mkdir(exist_ok=True)
         
         # TODO: Initialize wptools or pywikibot
         
-        logger.info(f"✓ FetchModule initialized (lang={self.lang}, timeout={self.timeout}s)")
+        logger.info(f"[OK] FetchModule initialized (lang={self.lang}, timeout={self.timeout}s)")
     
     def fetch_page(self, page_title: str, use_cache: bool = True) -> Dict:
         """
@@ -56,7 +67,19 @@ class FetchModule:
                 logger.info(f"  [OK] Cache hit for: '{page_title}'")
                 return cached
         
-        # Fetch with retries
+        # Steel API scrape (preferred) if configured
+        if self.use_steel_api and self.steel_api_key:
+            steel_data = self._scrape_with_steel(page_title)
+            if steel_data.get("success"):
+                self._save_to_cache(page_title, steel_data)
+                logger.info(f"  [OK] Fetched via Steel: '{steel_data.get('title', page_title)}'")
+                return steel_data
+
+            logger.warning(
+                f"  [WARN] Steel scrape failed: {steel_data.get('error', 'Unknown error')}. Falling back."
+            )
+
+        # Fetch with retries (wptools fallback)
         for attempt in range(1, self.max_retries + 1):
             try:
                 logger.info(f"  Attempt {attempt}/{self.max_retries}")
@@ -100,6 +123,62 @@ class FetchModule:
                     return {"success": False, "error": str(e), "title": page_title}
         
         return {"success": False, "error": "Max retries exceeded", "title": page_title}
+
+    def _scrape_with_steel(self, page_title: str) -> Dict:
+        """Scrape Wikipedia page content via Steel API."""
+        url = f"https://{self.lang}.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
+        endpoint = f"{self.steel_api_url.rstrip('/')}/v1/scrape"
+        headers = {
+            "Content-Type": "application/json",
+            "steel-api-key": self.steel_api_key,
+        }
+        payload = {
+            "url": url,
+            "format": self.steel_scrape_formats,
+            "delay": self.steel_delay_ms,
+            "useProxy": self.steel_use_proxy,
+            "screenshot": False,
+            "pdf": False,
+            "region": None,
+        }
+
+        try:
+            response = requests.post(endpoint, json=payload, headers=headers, timeout=self.timeout)
+            if response.status_code != 200:
+                return {
+                    "success": False,
+                    "error": f"Steel API returned {response.status_code}",
+                    "title": page_title,
+                }
+
+            data = response.json()
+            content = data.get("content", {})
+            html = content.get("cleaned_html") or content.get("html") or ""
+            markdown = content.get("markdown") or ""
+            text = self._html_to_text(html) if html else markdown
+            sections = self._extract_sections_from_text(text)
+            metadata = data.get("metadata", {})
+
+            return {
+                "title": metadata.get("title", page_title),
+                "url": metadata.get("urlSource", url),
+                "timestamp": datetime.now().isoformat(),
+                "content": text,
+                "extract": text,
+                "html": html,
+                "markdown": markdown,
+                "sections": sections,
+                "source": "steel",
+                "success": True,
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "title": page_title}
+
+    def _html_to_text(self, html: str) -> str:
+        """Convert HTML to plain text for summarization."""
+        soup = BeautifulSoup(html or "", "html.parser")
+        paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
+        return " ".join(paragraphs).strip()
     
     def _get_from_cache(self, page_title: str) -> Optional[Dict]:
         """Get page from cache if available and not expired."""

@@ -164,7 +164,7 @@ class SummarizeModule:
         if num_bullets is None:
             num_bullets = self.default_bullets
         
-        logger.info(f"📝 Generating full summary ({num_bullets} bullets)")
+        logger.info(f"[INFO] Generating full summary ({num_bullets} bullets)")
         
         abstract = self.generate_abstract(content)
         sections = content.get('sections', [])
@@ -179,7 +179,7 @@ class SummarizeModule:
             "timestamp": content.get('timestamp', '')
         }
         
-        logger.info(f"✓ Summary generated")
+        logger.info("[OK] Summary generated")
         return summary
     
     def compare_topics(self, topic1_content: Dict, topic2_content: Dict, num_points: int = 5) -> Dict:

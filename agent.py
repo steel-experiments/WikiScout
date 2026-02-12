@@ -17,11 +17,10 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
-# Import modules (we'll create these)
-# from modules.search import SearchModule
-# from modules.fetch import FetchModule
-# from modules.parse import ParseModule
-# from modules.summarize import SummarizeModule
+from modules.search import SearchModule
+from modules.fetch import FetchModule
+from modules.parse import ParseModule
+from modules.summarize import SummarizeModule
 
 
 # Configure logging
@@ -48,6 +47,10 @@ class WikipediaAgent:
         self.config = self._load_config()
         self.cache_dir = Path(self.config.get("cache_dir", "./cache"))
         self.cache_dir.mkdir(exist_ok=True)
+        self.search_module = SearchModule(self.config)
+        self.fetch_module = FetchModule(self.config)
+        self.parse_module = ParseModule(self.config)
+        self.summarize_module = SummarizeModule(self.config)
         logger.info(f"OK: Agent initialized (v{__version__})")
     
     def _load_config(self) -> dict:
@@ -57,7 +60,7 @@ class WikipediaAgent:
                 with open(self.config_path, 'r') as f:
                     return json.load(f)
             except json.JSONDecodeError:
-                logger.warning(f"⚠ Invalid config file. Using defaults.")
+                logger.warning("[WARN] Invalid config file. Using defaults.")
         return self._default_config()
     
     @staticmethod
@@ -67,7 +70,7 @@ class WikipediaAgent:
             "wikipedia_lang": "en",
             "cache_dir": "./cache",
             "cache_ttl_seconds": 3600,
-            "timeout_seconds": 30,
+            "timeout_seconds": 60,
             "max_retries": 3,
             "rate_limit_delay_ms": 500,
             "default_summary_bullets": 5,
@@ -87,18 +90,20 @@ class WikipediaAgent:
         """
         logger.info(f"[SEARCH] for: '{query}'")
         
-        # Placeholder implementation - will use SearchModule
+        candidates_list = self.search_module.search(query, limit=candidates)
+        if not candidates_list:
+            return {
+                "status": "error",
+                "query": query,
+                "timestamp": datetime.now().isoformat(),
+                "error": "No candidates found"
+            }
+
         return {
             "status": "success",
             "query": query,
             "timestamp": datetime.now().isoformat(),
-            "candidates": [
-                {
-                    "title": f"{query} (main)",
-                    "url": f"https://en.wikipedia.org/wiki/{query.replace(' ', '_')}",
-                    "description": "Main article"
-                }
-            ]
+            "candidates": candidates_list
         }
     
     def fetch(self, page_title: str) -> dict:
@@ -113,14 +118,23 @@ class WikipediaAgent:
         """
         logger.info(f"[FETCH] page: '{page_title}'")
         
-        # Placeholder implementation - will use FetchModule
+        page_data = self.fetch_module.fetch_page(page_title)
+        if not page_data.get("success"):
+            return {
+                "status": "error",
+                "title": page_title,
+                "timestamp": datetime.now().isoformat(),
+                "error": page_data.get("error", "Unknown error")
+            }
+
         return {
             "status": "success",
-            "title": page_title,
-            "url": f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}",
-            "timestamp": datetime.now().isoformat(),
-            "content": "Page content would go here...",
-            "sections": ["Introduction", "History", "Properties", "Applications"]
+            "title": page_data.get("title", page_title),
+            "url": page_data.get("url", ""),
+            "timestamp": page_data.get("timestamp", datetime.now().isoformat()),
+            "content": page_data.get("content", ""),
+            "html": page_data.get("html", ""),
+            "sections": page_data.get("sections", [])
         }
     
     def summarize(self, page_title: str, bullets: int = 5) -> dict:
@@ -136,16 +150,57 @@ class WikipediaAgent:
         """
         logger.info(f"[SUMMARIZE] '{page_title}' ({bullets} bullets)")
         
-        # Placeholder implementation - will use SummarizeModule
+        page_data = self.fetch_module.fetch_page(page_title)
+        if not page_data.get("success"):
+            return {
+                "status": "error",
+                "title": page_title,
+                "timestamp": datetime.now().isoformat(),
+                "error": page_data.get("error", "Unknown error")
+            }
+
+        html = page_data.get("html", "")
+        sections = self.parse_module.extract_sections(html) if html else []
+        if not sections:
+            section_titles = page_data.get("sections", [])
+            content_text = page_data.get("content", "") or page_data.get("extract", "")
+            if section_titles and isinstance(section_titles[0], str):
+                sections = [
+                    {
+                        "heading": title,
+                        "text": content_text[:500],
+                        "html_id": title.lower().replace(" ", "_")
+                    }
+                    for title in section_titles
+                ]
+            elif content_text:
+                sections = [{"heading": "Content", "text": content_text[:500], "html_id": "content"}]
+        content = {
+            "title": page_data.get("title", page_title),
+            "url": page_data.get("url", ""),
+            "extract": page_data.get("extract", ""),
+            "content": page_data.get("content", ""),
+            "sections": sections,
+            "timestamp": page_data.get("timestamp", datetime.now().isoformat())
+        }
+
+        summary = self.summarize_module.generate_summary(content, num_bullets=bullets)
+        formatted = []
+        for bullet in summary.get("bullets", []):
+            section = bullet.get("section", "Content")
+            formatted.append(f"{bullet.get('text', '')} (Section: {section})")
+
+        while len(formatted) < bullets:
+            formatted.append(
+                f"Key point about {summary.get('title', page_title)} (Section: Content)"
+            )
+
         return {
             "status": "success",
-            "title": page_title,
+            "title": summary.get("title", page_title),
             "timestamp": datetime.now().isoformat(),
-            "summary": [
-                f"Point {i+1} about {page_title} with citation (Section: Example)"
-                for i in range(bullets)
-            ],
-            "source_url": f"https://en.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
+            "summary": formatted,
+            "source_url": summary.get("url", page_data.get("url", ""))
         }
     
     def compare(self, topic1: str, topic2: str, bullets: int = 5) -> dict:
@@ -162,15 +217,27 @@ class WikipediaAgent:
         """
         logger.info(f"[COMPARE] '{topic1}' vs '{topic2}'")
         
-        # Placeholder implementation
+        page1 = self.fetch_module.fetch_page(topic1)
+        page2 = self.fetch_module.fetch_page(topic2)
+
+        if not page1.get("success") or not page2.get("success"):
+            return {
+                "status": "error",
+                "topic1": topic1,
+                "topic2": topic2,
+                "timestamp": datetime.now().isoformat(),
+                "error": "Failed to fetch one or both topics"
+            }
+
+        comparison = self.summarize_module.compare_topics(page1, page2, num_points=bullets)
         return {
             "status": "success",
-            "topic1": topic1,
-            "topic2": topic2,
+            "topic1": comparison.get("topic1", topic1),
+            "topic2": comparison.get("topic2", topic2),
             "timestamp": datetime.now().isoformat(),
             "comparison": {
-                "similarities": [f"Similarity {i+1}" for i in range(bullets//2)],
-                "differences": [f"Difference {i+1}" for i in range(bullets//2)]
+                "similarities": comparison.get("similarities", []),
+                "differences": comparison.get("differences", [])
             }
         }
 
@@ -196,14 +263,14 @@ def search(query: str, candidates: int):
     result = agent.search(query, candidates)
     
     if result['status'] == 'success':
-        click.echo(f"\n✓ Search Results for: '{query}'")
+        click.echo(f"\nOK: Search Results for: '{query}'")
         click.echo(f"  Found {len(result['candidates'])} candidate(s)\n")
         for i, candidate in enumerate(result['candidates'], 1):
             click.echo(f"  [{i}] {candidate['title']}")
             click.echo(f"      {candidate['description']}")
             click.echo(f"      {candidate['url']}\n")
     else:
-        click.echo(f"✗ Search failed: {result.get('error', 'Unknown error')}", err=True)
+        click.echo(f"ERROR: Search failed: {result.get('error', 'Unknown error')}", err=True)
 
 
 @cli.command()
@@ -216,20 +283,20 @@ def summarize(query: str, bullets: int):
     # First search to confirm page exists
     search_result = agent.search(query)
     if search_result['status'] != 'success':
-        click.echo(f"✗ Page not found: '{query}'", err=True)
+        click.echo(f"ERROR: Page not found: '{query}'", err=True)
         return
     
     # Then summarize
     result = agent.summarize(query, bullets)
     
     if result['status'] == 'success':
-        click.echo(f"\n✓ Summary: {result['title']}")
+        click.echo(f"\nOK: Summary: {result['title']}")
         click.echo(f"  Source: {result['source_url']}\n")
         for i, point in enumerate(result['summary'], 1):
             click.echo(f"  {i}) {point}")
         click.echo()
     else:
-        click.echo(f"✗ Summarize failed: {result.get('error', 'Unknown error')}", err=True)
+        click.echo(f"ERROR: Summarize failed: {result.get('error', 'Unknown error')}", err=True)
 
 
 @cli.command()
@@ -253,7 +320,7 @@ def compare(topic1: str, topic2: str, bullets: int):
             click.echo(f"  • {diff}")
         click.echo()
     else:
-        click.echo(f"✗ Comparison failed: {result.get('error', 'Unknown error')}", err=True)
+        click.echo(f"ERROR: Comparison failed: {result.get('error', 'Unknown error')}", err=True)
 
 
 @cli.command()
@@ -264,14 +331,23 @@ def infobox(query: str):
     result = agent.fetch(query)
     
     if result['status'] == 'success':
-        click.echo(f"\n✓ Infobox: {result['title']}")
+        html = result.get("html", "")
+        infobox = agent.parse_module.extract_infobox(html) if html else {"fields": {}}
+        fields = infobox.get("fields", {})
+
+        click.echo(f"\nOK: Infobox: {result['title']}")
         click.echo(f"  Source: {result['url']}\n")
-        click.echo("  Fields (placeholder):")
-        click.echo("    • Field 1: Value 1")
-        click.echo("    • Field 2: Value 2")
+
+        if not fields:
+            click.echo("  No infobox fields found.\n")
+            return
+
+        click.echo("  Fields:")
+        for label, value in list(fields.items())[:12]:
+            click.echo(f"    • {label}: {value}")
         click.echo()
     else:
-        click.echo(f"✗ Failed to fetch infobox: {result.get('error', 'Unknown error')}", err=True)
+        click.echo(f"ERROR: Failed to fetch infobox: {result.get('error', 'Unknown error')}", err=True)
 
 
 @cli.command()
@@ -279,7 +355,7 @@ def status():
     """Check agent status and configuration."""
     agent = WikipediaAgent()
     
-    click.echo(f"\n✓ Agent Status")
+    click.echo(f"\nOK: Agent Status")
     click.echo(f"  Version: {__version__}")
     click.echo(f"  Config: {agent.config_path}")
     click.echo(f"  Cache dir: {agent.cache_dir}")
@@ -292,6 +368,6 @@ if __name__ == '__main__':
     try:
         cli()
     except Exception as e:
-        logger.error(f"✗ Agent error: {str(e)}")
-        click.echo(f"✗ Error: {str(e)}", err=True)
+        logger.error(f"[ERROR] Agent error: {str(e)}")
+        click.echo(f"ERROR: {str(e)}", err=True)
         exit(1)

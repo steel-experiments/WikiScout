@@ -8,5 +8,8 @@ cache/
 .pytest_cache/
 agent.log
 
-# Test run cache (kept in repo if needed)
-# test_cache/
+# Local environment
+.env
+
+# Test run cache
+test_cache/

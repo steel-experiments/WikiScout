@@ -15,6 +15,18 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
+Set your Steel API key (recommended for live scraping):
+
+```powershell
+$env:STEEL_API_KEY="YOUR_STEEL_API_KEY"
+```
+
+Or add it to a local .env (ignored by git):
+
+```text
+STEEL_API_KEY=YOUR_STEEL_API_KEY
+```
+
 ### 2. Verify Installation
 
 ```powershell
@@ -63,11 +75,11 @@ python agent.py status
 - Returns 5 ranked candidates with similarity scores
 - Disambiguation page detection
 
-### 2. Fetch Module (Real Wikipedia Integration) ✓
-- wptools library for live page retrieval
+### 2. Fetch Module (Steel API + wptools fallback) ✓
+- Steel API scrape for HTML/markdown extraction
 - Intelligent caching with 1-hour TTL
 - Retry logic with exponential backoff
-- JSON cache with timestamp metadata
+- Automatic fallback to wptools when Steel is not configured
 
 ### 3. Parse Module (BeautifulSoup4) ✓
 - HTML section extraction (h2/h3/h4 headings)
@@ -123,7 +135,13 @@ Edit `config.json` to customize:
   "timeout_seconds": 30,            # Request timeout
   "max_retries": 3,                 # Retry attempts
   "default_summary_bullets": 5,     # Default bullet points
-  "log_level": "INFO"               # Logging level
+  "log_level": "INFO",              # Logging level
+  "use_steel_api": true,            # Use Steel API when available
+  "steel_api_key": "",              # Or set STEEL_API_KEY env var
+  "steel_api_url": "https://api.steel.dev",
+  "steel_scrape_formats": ["cleaned_html", "markdown"],
+  "steel_use_proxy": false,
+  "steel_delay_ms": 0
 }
 ```
 

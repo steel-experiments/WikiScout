@@ -10,23 +10,26 @@ Handles:
 import logging
 import re
 import wptools
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 from difflib import SequenceMatcher
 
 logger = logging.getLogger(__name__)
 
 
+Candidate = Dict[str, Any]
+
+
 class SearchModule:
     """Wikipedia search functionality using wptools."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize search module with configuration."""
         self.config = config
         self.lang = config.get("wikipedia_lang", "en")
         self.max_retries = config.get("max_retries", 3)
         logger.info(f"  [OK] SearchModule initialized (lang={self.lang})")
     
-    def search(self, query: str, limit: int = 5) -> List[Dict]:
+    def search(self, query: str, limit: int = 5) -> List[Candidate]:
         """
         Search for Wikipedia pages matching the query using wptools.
         
@@ -60,7 +63,7 @@ class SearchModule:
             logger.error(f"  [ERROR] Search failed: {str(e)}")
             return []
     
-    def _search_direct(self, title: str, limit: int) -> List[Dict]:
+    def _search_direct(self, title: str, limit: int) -> List[Candidate]:
         """
         Try fetching page directly by title using wptools.
         """
@@ -84,7 +87,7 @@ class SearchModule:
             logger.info(f"  [INFO] Direct fetch failed: {str(e)[:50]}")
             return []
     
-    def _search_mediawiki(self, query: str, limit: int) -> List[Dict]:
+    def _search_mediawiki(self, query: str, limit: int) -> List[Candidate]:
         """
         Search Wikipedia using MediaWiki search API with proper headers.
         """
@@ -97,7 +100,7 @@ class SearchModule:
             }
             
             search_url = "https://en.wikipedia.org/w/api.php"
-            params = {
+            params: Dict[str, str | int] = {
                 "action": "query",
                 "list": "search",
                 "srsearch": query,
@@ -139,7 +142,7 @@ class SearchModule:
         ratio = SequenceMatcher(None, title.lower(), query.lower()).ratio()
         return min(1.0, ratio + 0.1)
     
-    def resolve_disambiguation(self, query: str) -> Dict:
+    def resolve_disambiguation(self, query: str) -> Dict[str, Any]:
         """
         Resolve disambiguation pages.
         
@@ -164,7 +167,7 @@ class SearchModule:
         logger.info(f"  [INFO] No disambiguation page found")
         return {"is_disambiguation": False, "candidates": candidates}
     
-    def find_best_match(self, query: str, candidates: List[Dict]) -> Optional[Dict]:
+    def find_best_match(self, query: str, candidates: List[Candidate]) -> Optional[Candidate]:
         """
         Select the best matching page from candidates.
         
@@ -201,7 +204,7 @@ class SearchModule:
         """
         logger.warning(f"  [WARN] Suggesting alternatives for: '{query}'")
         
-        alternatives = []
+        alternatives: List[str] = []
         
         # Try common suffixes
         suffixes = [" (concept)", " (person)", " (place)", " (disambiguation)"]

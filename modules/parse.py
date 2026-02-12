@@ -10,16 +10,19 @@ Handles:
 
 import logging
 import re
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
 
+Section = Dict[str, Any]
+
+
 class ParseModule:
     """Wikipedia content parsing functionality with BeautifulSoup4."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize parse module."""
         self.config = config
         logger.info(f"  [OK] ParseModule initialized")
@@ -55,7 +58,7 @@ class ParseModule:
             return text
     
     
-    def extract_sections(self, html_content: str) -> List[Dict]:
+    def extract_sections(self, html_content: str) -> List[Section]:
         """
         Extract sections from Wikipedia HTML content using BeautifulSoup.
         Properly cleans HTML tags from all extracted text.
@@ -73,8 +76,8 @@ class ParseModule:
         
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
-            sections = []
-            current_section = None
+            sections: List[Section] = []
+            current_section: Optional[Section] = None
             
             # Find all headings and paragraphs
             for element in soup.find_all(['h2', 'h3', 'h4', 'p']):
@@ -108,7 +111,11 @@ class ParseModule:
             
             # Combine paragraphs into full text and clean
             for section in sections:
-                full_text = " ".join(section.get("paragraphs", []))
+                paragraphs = section.get("paragraphs", [])
+                if isinstance(paragraphs, list):
+                    full_text = " ".join(paragraphs)
+                else:
+                    full_text = ""
                 # Clean any remaining HTML artifacts
                 section["text"] = self.clean_html_text(full_text)[:500]
             
@@ -119,7 +126,7 @@ class ParseModule:
             logger.warning(f"  [WARN] Section extraction error: {str(e)}")
             return []
     
-    def parse_html_content(self, html_content: str) -> Dict:
+    def parse_html_content(self, html_content: str) -> Dict[str, Any]:
         """
         Parse complete HTML content structure.
         
@@ -134,11 +141,13 @@ class ParseModule:
             
             paragraphs = [p.get_text(strip=True) for p in soup.find_all('p')]
             
-            links = []
+            links: List[Dict[str, str]] = []
             for a in soup.find_all('a'):
                 href = a.get('href', '')
                 text = a.get_text(strip=True)
-                if href and text and not href.startswith('#'):
+                if isinstance(href, list):
+                    href = href[0] if href else ""
+                if isinstance(href, str) and href and text and not href.startswith('#'):
                     links.append({"text": text, "url": href})
             
             return {
@@ -149,7 +158,7 @@ class ParseModule:
         except:
             return {"paragraphs": [], "links": [], "text": ""}
     
-    def extract_infobox(self, html_content: str) -> Dict:
+    def extract_infobox(self, html_content: str) -> Dict[str, Any]:
         """
         Extract infobox data from Wikipedia page using BeautifulSoup.
         
@@ -163,7 +172,8 @@ class ParseModule:
         
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
-            infobox_data = {"type": "Unknown", "fields": {}}
+            fields: Dict[str, str] = {}
+            infobox_data: Dict[str, Any] = {"type": "Unknown", "fields": fields}
             
             infobox_table = soup.find('table', {'class': 'infobox'})
             if not infobox_table:
@@ -179,7 +189,7 @@ class ParseModule:
                     value = cells[1].get_text(strip=True)
                     
                     if label and value:
-                        infobox_data["fields"][label] = value
+                        fields[label] = value
             
             logger.info(f"  [OK] Infobox extracted with {len(infobox_data['fields'])} field(s)")
             return infobox_data
@@ -209,7 +219,7 @@ class ParseModule:
         
         return text
     
-    def extract_citations(self, text: str) -> List[Dict]:
+    def extract_citations(self, text: str) -> List[Dict[str, str]]:
         """
         Extract and identify citations in text.
         
@@ -256,7 +266,7 @@ class ParseModule:
         
         return tags
     
-    def extract_links(self, content: str) -> List[Dict]:
+    def extract_links(self, content: str) -> List[Dict[str, str]]:
         """
         Extract Wikipedia internal links.
         

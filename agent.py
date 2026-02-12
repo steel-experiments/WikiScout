@@ -15,7 +15,7 @@ import click
 import json
 import logging
 from pathlib import Path
-from typing import Optional, List
+from typing import Any, Dict, List, Optional, cast
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 __version__ = "1.1"
 
 
+AgentResult = Dict[str, Any]
+
+
 class WikipediaAgent:
     """Main agent class for Wikipedia browsing and summarization."""
     
@@ -57,18 +60,18 @@ class WikipediaAgent:
         self.summarize_module = SummarizeModule(self.config)
         logger.info(f"OK: Agent initialized (v{__version__})")
     
-    def _load_config(self) -> dict:
+    def _load_config(self) -> Dict[str, Any]:
         """Load configuration from config.json."""
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
-                    return json.load(f)
+                    return cast(Dict[str, Any], json.load(f))
             except json.JSONDecodeError:
                 logger.warning("[WARN] Invalid config file. Using defaults.")
         return self._default_config()
     
     @staticmethod
-    def _default_config() -> dict:
+    def _default_config() -> Dict[str, Any]:
         """Return default configuration."""
         return {
             "wikipedia_lang": "en",
@@ -81,7 +84,7 @@ class WikipediaAgent:
             "log_level": "INFO"
         }
     
-    def search(self, query: str, candidates: int = 5) -> dict:
+    def search(self, query: str, candidates: int = 5) -> AgentResult:
         """
         Search for a Wikipedia page.
         
@@ -110,7 +113,7 @@ class WikipediaAgent:
             "candidates": candidates_list
         }
     
-    def fetch(self, page_title: str) -> dict:
+    def fetch(self, page_title: str) -> AgentResult:
         """
         Fetch Wikipedia page content.
         
@@ -141,7 +144,7 @@ class WikipediaAgent:
             "sections": page_data.get("sections", [])
         }
     
-    def summarize(self, page_title: str, bullets: int = 5) -> dict:
+    def summarize(self, page_title: str, bullets: int = 5) -> AgentResult:
         """
         Summarize a Wikipedia page.
         
@@ -207,7 +210,7 @@ class WikipediaAgent:
             "source_url": summary.get("url", page_data.get("url", ""))
         }
     
-    def compare(self, topic1: str, topic2: str, bullets: int = 5) -> dict:
+    def compare(self, topic1: str, topic2: str, bullets: int = 5) -> AgentResult:
         """
         Compare two Wikipedia topics.
         
@@ -245,7 +248,7 @@ class WikipediaAgent:
             }
         }
 
-    async def search_async(self, query: str, candidates: int = 5) -> dict:
+    async def search_async(self, query: str, candidates: int = 5) -> AgentResult:
         """
         Async search for a Wikipedia page.
         """
@@ -267,7 +270,7 @@ class WikipediaAgent:
             "candidates": candidates_list
         }
 
-    async def fetch_async(self, page_title: str, use_cache: bool = True) -> dict:
+    async def fetch_async(self, page_title: str, use_cache: bool = True) -> AgentResult:
         """
         Async fetch Wikipedia page content.
         """
@@ -292,13 +295,13 @@ class WikipediaAgent:
             "sections": page_data.get("sections", [])
         }
 
-    async def fetch_pages_async(self, page_titles: List[str], use_cache: bool = True) -> List[dict]:
+    async def fetch_pages_async(self, page_titles: List[str], use_cache: bool = True) -> List[AgentResult]:
         """
         Async fetch multiple pages in parallel.
         """
         return await self.async_fetch_module.fetch_pages_batch(page_titles, use_cache=use_cache)
 
-    async def summarize_async(self, page_title: str, bullets: int = 5) -> dict:
+    async def summarize_async(self, page_title: str, bullets: int = 5) -> AgentResult:
         """
         Async summarize a Wikipedia page.
         """
@@ -357,7 +360,7 @@ class WikipediaAgent:
             "source_url": summary.get("url", page_data.get("url", ""))
         }
 
-    async def compare_async(self, topic1: str, topic2: str, bullets: int = 5) -> dict:
+    async def compare_async(self, topic1: str, topic2: str, bullets: int = 5) -> AgentResult:
         """
         Async compare two Wikipedia topics.
         """
@@ -394,7 +397,7 @@ class WikipediaAgent:
 
 
 # CLI Commands
-def format_output(data: dict, format_type: str = "text") -> str:
+def format_output(data: Dict[str, Any], format_type: str = "text") -> str:
     """
     Format output as text or JSON.
     

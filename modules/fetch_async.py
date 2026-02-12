@@ -12,20 +12,22 @@ import logging
 import json
 import asyncio
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 from datetime import datetime
 
 import httpx
 import aiofiles
-from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
+
+
+PageData = Dict[str, Any]
 
 
 class AsyncFetchModule:
     """Async Wikipedia page fetching with parallel operations."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize async fetch module with configuration."""
         self.config = config
         self.lang = config.get("wikipedia_lang", "en")
@@ -43,7 +45,7 @@ class AsyncFetchModule:
         
         logger.info(f"[OK] AsyncFetchModule initialized (lang={self.lang}, timeout={self.timeout}s)")
     
-    async def fetch_page(self, page_title: str, use_cache: bool = True) -> Dict:
+    async def fetch_page(self, page_title: str, use_cache: bool = True) -> PageData:
         """
         Async fetch Wikipedia page content via MediaWiki API.
         
@@ -94,7 +96,7 @@ class AsyncFetchModule:
         
         return {"success": False, "error": "Max retries exceeded", "title": page_title}
     
-    async def fetch_pages_batch(self, page_titles: List[str], use_cache: bool = True) -> List[Dict]:
+    async def fetch_pages_batch(self, page_titles: List[str], use_cache: bool = True) -> List[PageData]:
         """
         Fetch multiple pages in parallel (10-20x faster than sequential).
         
@@ -119,11 +121,11 @@ class AsyncFetchModule:
         
         return [r if isinstance(r, dict) else {"success": False, "error": str(r)} for r in results]
     
-    async def _fetch_via_api(self, client: httpx.AsyncClient, page_title: str) -> Dict:
+    async def _fetch_via_api(self, client: httpx.AsyncClient, page_title: str) -> PageData:
         """Fetch page content via MediaWiki API."""
         
         # Step 1: Get page ID and basic info
-        params = {
+        params: Dict[str, str | int | bool] = {
             "action": "query",
             "format": "json",
             "titles": page_title,
@@ -151,7 +153,7 @@ class AsyncFetchModule:
             page = pages[page_id]
             
             # Step 2: Get HTML content for parsing
-            html_params = {
+            html_params: Dict[str, str] = {
                 "action": "parse",
                 "format": "json",
                 "page": page_title,
@@ -191,7 +193,7 @@ class AsyncFetchModule:
         except Exception as e:
             return {"success": False, "error": str(e), "title": page_title}
     
-    async def _get_from_cache(self, page_title: str) -> Optional[Dict]:
+    async def _get_from_cache(self, page_title: str) -> Optional[PageData]:
         """Async get page from cache if available and not expired."""
         cache_file = self.cache_dir / f"{page_title.replace(' ', '_')}.json"
         
@@ -201,7 +203,7 @@ class AsyncFetchModule:
         try:
             async with aiofiles.open(cache_file, 'r', encoding='utf-8') as f:
                 content = await f.read()
-                cached_data = json.loads(content)
+                cached_data = cast(PageData, json.loads(content))
             
             # Check if cache is expired
             timestamp_str = cached_data.get("timestamp", "")
@@ -221,7 +223,7 @@ class AsyncFetchModule:
             logger.warning(f"  [WARN] Async cache read error: {str(e)}")
             return None
     
-    async def _save_to_cache(self, page_title: str, data: Dict) -> None:
+    async def _save_to_cache(self, page_title: str, data: PageData) -> None:
         """Async save page to cache."""
         cache_file = self.cache_dir / f"{page_title.replace(' ', '_')}.json"
         
@@ -246,7 +248,7 @@ class AsyncFetchModule:
         except Exception as e:
             logger.error(f"  [ERROR] Async failed to clear cache: {str(e)}")
     
-    def get_cache_stats(self) -> Dict:
+    def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics (synchronous)."""
         cached_files = list(self.cache_dir.glob("*.json"))
         total_size = sum(f.stat().st_size for f in cached_files) / 1024  # KB

@@ -15,17 +15,20 @@ import time
 import wptools
 import requests
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional, cast
 from datetime import datetime
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
 
+PageData = Dict[str, Any]
+
+
 class FetchModule:
     """Wikipedia page fetching functionality."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize fetch module with configuration."""
         self.config = config
         self.lang = config.get("wikipedia_lang", "en")
@@ -38,7 +41,7 @@ class FetchModule:
         self.steel_api_url = config.get("steel_api_url", "https://api.steel.dev")
         self.steel_use_proxy = config.get("steel_use_proxy", False)
         self.steel_delay_ms = config.get("steel_delay_ms", 0)
-        self.steel_scrape_formats = config.get(
+        self.steel_scrape_formats: List[str] = config.get(
             "steel_scrape_formats", ["cleaned_html", "markdown"]
         )
         self.cache_dir.mkdir(exist_ok=True)
@@ -47,7 +50,7 @@ class FetchModule:
         
         logger.info(f"[OK] FetchModule initialized (lang={self.lang}, timeout={self.timeout}s)")
     
-    def fetch_page(self, page_title: str, use_cache: bool = True) -> Dict:
+    def fetch_page(self, page_title: str, use_cache: bool = True) -> PageData:
         """
         Fetch Wikipedia page content using wptools.
         
@@ -124,7 +127,7 @@ class FetchModule:
         
         return {"success": False, "error": "Max retries exceeded", "title": page_title}
 
-    def _scrape_with_steel(self, page_title: str) -> Dict:
+    def _scrape_with_steel(self, page_title: str) -> PageData:
         """Scrape Wikipedia page content via Steel API."""
         url = f"https://{self.lang}.wikipedia.org/wiki/{page_title.replace(' ', '_')}"
         endpoint = f"{self.steel_api_url.rstrip('/')}/v1/scrape"
@@ -180,7 +183,7 @@ class FetchModule:
         paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
         return " ".join(paragraphs).strip()
     
-    def _get_from_cache(self, page_title: str) -> Optional[Dict]:
+    def _get_from_cache(self, page_title: str) -> Optional[PageData]:
         """Get page from cache if available and not expired."""
         cache_file = self.cache_dir / f"{page_title.replace(' ', '_')}.json"
         
@@ -189,7 +192,7 @@ class FetchModule:
         
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
-                cached_data = json.load(f)
+                cached_data = cast(PageData, json.load(f))
             
             # Check if cache is expired
             timestamp_str = cached_data.get("timestamp", "")
@@ -209,7 +212,7 @@ class FetchModule:
             logger.warning(f"  [WARN] Cache read error: {str(e)}")
             return None
     
-    def _save_to_cache(self, page_title: str, data: Dict) -> None:
+    def _save_to_cache(self, page_title: str, data: PageData) -> None:
         """Save page to cache."""
         cache_file = self.cache_dir / f"{page_title.replace(' ', '_')}.json"
         
@@ -234,7 +237,7 @@ class FetchModule:
         except Exception as e:
             logger.error(f"  [ERROR] Failed to clear cache: {str(e)}")
     
-    def get_cache_stats(self) -> Dict:
+    def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         cached_files = list(self.cache_dir.glob("*.json"))
         total_size = sum(f.stat().st_size for f in cached_files) / 1024  # KB
@@ -245,7 +248,7 @@ class FetchModule:
             "cache_dir": str(self.cache_dir)
         }
     
-    def _extract_sections_from_text(self, text: str) -> list:
+    def _extract_sections_from_text(self, text: str) -> List[str]:
         """Extract section headers from extract text."""
         sections = []
         

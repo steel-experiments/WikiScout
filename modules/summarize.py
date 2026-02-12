@@ -10,17 +10,21 @@ Handles:
 
 import logging
 import re
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 from collections import Counter
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
 
+Section = Dict[str, Any]
+Summary = Dict[str, Any]
+
+
 class SummarizeModule:
     """Content summarization and comparison with NLP-like features."""
     
-    def __init__(self, config: dict):
+    def __init__(self, config: Dict[str, Any]):
         """Initialize summarize module."""
         self.config = config
         self.default_bullets = config.get("default_summary_bullets", 5)
@@ -42,7 +46,7 @@ class SummarizeModule:
         except:
             return text
     
-    def generate_abstract(self, content: Dict) -> str:
+    def generate_abstract(self, content: Dict[str, Any]) -> str:
         """
         Generate a 1-2 sentence abstract from page content using extractive summarization.
         
@@ -78,7 +82,7 @@ class SummarizeModule:
         sentences = [s.strip() for s in sentences if s.strip()]
         return sentences
     
-    def generate_bullets(self, sections: List[Dict], num_bullets: int) -> List[Dict]:
+    def generate_bullets(self, sections: List[Section], num_bullets: int) -> List[Section]:
         """
         Generate bullet point summary from sections using extractive summarization.
         Prioritizes informative content and avoids sparse/generic bullets.
@@ -169,7 +173,7 @@ class SummarizeModule:
         text_lower = text.lower()
         return any(re.match(pattern, text_lower) for pattern in generic_patterns)
     
-    def _score_section(self, section: Dict) -> float:
+    def _score_section(self, section: Section) -> float:
         """
         Score a section based on content quality and informativeness.
         Prioritizes specific, fact-rich content over generic introductions.
@@ -252,7 +256,7 @@ class SummarizeModule:
             "however", "therefore", "moreover", "likewise", "additionally"
         }
         
-        scored = []
+        scored: List[tuple[float, str]] = []
         for sent in sentences:
             sent_lower = sent.lower()
             words = sent.split()
@@ -265,7 +269,7 @@ class SummarizeModule:
             if any(sent_lower.startswith(starter) for starter in generic_starters):
                 continue
             
-            score = 0
+            score: float = 0.0
             
             # Boost score based on sentence quality
             unique_words = len(set(words))
@@ -309,7 +313,7 @@ class SummarizeModule:
         
         return sentences[0][:150] if sentences else ""
     
-    def generate_summary(self, content: Dict, num_bullets: int = None) -> Dict:
+    def generate_summary(self, content: Dict[str, Any], num_bullets: Optional[int] = None) -> Summary:
         """
         Generate complete summary (abstract + bullets).
         
@@ -341,7 +345,12 @@ class SummarizeModule:
         logger.info("[OK] Summary generated")
         return summary
     
-    def compare_topics(self, topic1_content: Dict, topic2_content: Dict, num_points: int = 5) -> Dict:
+    def compare_topics(
+        self,
+        topic1_content: Dict[str, Any],
+        topic2_content: Dict[str, Any],
+        num_points: int = 5,
+    ) -> Dict[str, Any]:
         """
         Compare two Wikipedia topics using keyword analysis.
         
@@ -412,7 +421,7 @@ class SummarizeModule:
         ]
         
         # Boost scoring for meaningful content
-        keyword_weights = {}
+        keyword_weights: Dict[str, float] = {}
         for word in filtered:
             # Boost nouns (words ending in -tion, -ment, -ness, -ism, -ity)
             if any(word.endswith(suffix) for suffix in ['tion', 'ment', 'ness', 'ism', 'ity', 'ble']):
@@ -430,7 +439,7 @@ class SummarizeModule:
         keywords = [w for w, _ in sorted_keywords[:top_n]]
         return keywords
     
-    def extract_glossary(self, content: Dict, num_terms: int = 8) -> List[Dict]:
+    def extract_glossary(self, content: Dict[str, Any], num_terms: int = 8) -> List[Dict[str, str]]:
         """
         Extract key terms and create glossary using keyword extraction.
         
@@ -446,7 +455,7 @@ class SummarizeModule:
         text = content.get('extract', '') or content.get('content', '')
         keywords = self._extract_keywords(text, top_n=num_terms)
         
-        glossary = []
+        glossary: List[Dict[str, str]] = []
         for i, keyword in enumerate(keywords[:num_terms]):
             glossary.append({
                 "term": keyword.title(),

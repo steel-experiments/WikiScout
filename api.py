@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, Path
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import Any, AsyncIterator, Dict, List
 from datetime import datetime
 import logging
 from contextlib import asynccontextmanager
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 agent = WikipediaAgent()
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("WikiScout API starting up...")
     logger.info("Docs available at: http://localhost:8000/docs")
     logger.info(f"Cache directory: {agent.cache_dir}")
